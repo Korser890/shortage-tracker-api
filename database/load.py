@@ -46,9 +46,29 @@ def load_headlines(engine):
     df.to_sql("news_headlines", engine, if_exists="append", index=False)
     logger.info(f"Loaded {len(df)} rows into news_headlines from {path.name}")
 
+def seed_resources(engine):
+    rows = [
+        (1, 'Brent Crude Oil',       'Energy', 'USD/barrel', 'EIA',  'daily',   'Global oil benchmark price - North Sea'),
+        (2, 'WTI Crude Oil',         'Energy', 'USD/barrel', 'EIA',  'daily',   'US oil benchmark price - Cushing Oklahoma'),
+        (3, 'Henry Hub Natural Gas', 'Energy', 'USD/MMBtu',  'EIA',  'daily',   'US natural gas benchmark price'),
+        (4, 'EU Natural Gas (TTF)',  'Energy', 'USD/MMBtu',  'FRED', 'monthly', 'European natural gas benchmark price'),
+        (5, 'World Oil Production',  'Energy', 'TBPD',       'EIA',  'monthly', 'Total world crude oil production'),
+        (6, 'OPEC Production',       'Energy', 'TBPD',       'EIA',  'monthly', 'OPEC member countries crude oil production'),
+        (7, 'World Oil Consumption', 'Energy', 'TBPD',       'EIA',  'monthly', 'Total world petroleum consumption'),
+    ]
+    with engine.connect() as conn:
+        conn.execute(text("""
+            INSERT INTO resources (resource_id, name, category, unit, source, frequency, description)
+            VALUES (:id, :name, :category, :unit, :source, :frequency, :description)
+            ON CONFLICT (resource_id) DO NOTHING
+        """), [dict(id=r[0], name=r[1], category=r[2], unit=r[3], source=r[4], frequency=r[5], description=r[6]) for r in rows])
+        conn.commit()
+    logger.info("Resources seeded (7 rows, skipped if already present)")
+
 
 def run():
     engine = get_engine()
+    seed_resources(engine)
     logger.info("Starting database load — truncating existing data")
     with engine.connect() as conn:
         conn.execute(text("TRUNCATE prices, shortage_signals, inventory_levels, production, news_headlines RESTART IDENTITY CASCADE"))
@@ -58,6 +78,7 @@ def run():
     load_production(engine)
     load_headlines(engine)
     logger.info("Database load complete")
+
 
 
 
