@@ -2,8 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict qVZk2IL9PNmdVsOz3BJc9oYk1rndyVy13z5OUk57ZnGzycDOdl6TuoyWdj7WqRh
-
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
 
@@ -442,5 +440,4 @@ ALTER TABLE ONLY public.shortage_signals
 -- PostgreSQL database dump complete
 --
 
-\unrestrict qVZk2IL9PNmdVsOz3BJc9oYk1rndyVy13z5OUk57ZnGzycDOdl6TuoyWdj7WqRh
 
