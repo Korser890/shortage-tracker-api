@@ -84,8 +84,13 @@ def get_headlines(conn, commodities: list[CommodityOverview]) -> list[HeadlineDa
 
     q = text("""
         SELECT headline, source, published_at, sentiment, resource_id, url
-        FROM news_headlines
-        WHERE resource_id IN (1, 2, 3, 4)
+        FROM (
+            SELECT DISTINCT ON (headline)
+                headline, source, published_at, sentiment, resource_id, url
+            FROM news_headlines
+            WHERE resource_id IN (1, 2, 3, 4)
+            ORDER BY headline, published_at DESC
+        ) deduped
         ORDER BY published_at DESC
         LIMIT 10
     """)
@@ -102,6 +107,7 @@ def get_headlines(conn, commodities: list[CommodityOverview]) -> list[HeadlineDa
         )
         for row in rows
     ]
+
 
 
 def get_supply_balance(conn) -> SupplyBalance | None:

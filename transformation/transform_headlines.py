@@ -61,7 +61,8 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 
     df["date"] = df["published_at"].dt.date.astype(str)
 
-    df = df.drop_duplicates(subset=["resource_id", "headline"])
+    df = df.drop_duplicates(subset=["headline"])
+
     df = df.sort_values(["resource_id", "published_at"])
 
     return df
