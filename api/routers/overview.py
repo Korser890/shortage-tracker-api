@@ -15,6 +15,12 @@ SLUG_MAP = {
     "ttf-gas":     {"resource_id": 4, "name": "EU Natural Gas (TTF)",  "unit": "USD/MMBtu"},
 }
 
+# EIA publishes prices 6-8 business days late, so week-old data is normal, not a failure.
+# Keep FRESHNESS_STALE_DAYS in sync with the StaleDataBanner threshold in the frontend.
+
+FRESHNESS_LAGGING_DAYS = 7
+FRESHNESS_STALE_DAYS = 10
+
 ORDERED_SLUGS = ["brent-crude", "wti-crude", "henry-hub", "ttf-gas"]
 
 
@@ -137,9 +143,9 @@ def get_meta(conn) -> OverviewMeta:
     last_updated = row.last_updated
 
     delta = (date.today() - last_updated).days
-    if delta == 0:
+    if delta <= FRESHNESS_LAGGING_DAYS:
         freshness = "fresh"
-    elif delta <= 3:
+    elif delta <= FRESHNESS_STALE_DAYS:
         freshness = "lagging"
     else:
         freshness = "stale"
