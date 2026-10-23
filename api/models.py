@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 from datetime import date, datetime
 
 class FlagHistoryEntry(BaseModel):
@@ -59,9 +59,10 @@ class InventoryData(BaseModel):
     unit: str
     five_year_max: float
     fill_pct: float
-    streak_direction: str
+    streak_direction: Literal["building", "declining", "flat"]
     streak_weeks: int
     latest_date: date
+
 
 class ProductionTrendEntry(BaseModel):
     date: date
