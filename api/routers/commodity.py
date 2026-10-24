@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from typing import Literal
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 from api.db import get_engine
 from api.models import (
@@ -8,16 +9,49 @@ from api.models import (
 from api.routers.overview import SLUG_MAP
 
 
-def get_price_trend(conn, resource_id: int) -> list[PriceTrendEntry]:
-    q = text("""
-        SELECT p.date, p.value AS price, p.rolling_std_365d, ss.price_dev_pct
-        FROM prices p
-        JOIN shortage_signals ss ON ss.resource_id = p.resource_id AND ss.date = p.date
-        WHERE p.resource_id = :rid
-        AND p.date >= CURRENT_DATE - INTERVAL '12 months'
-        ORDER BY p.date ASC
-    """)
-    rows = conn.execute(q, {"rid": resource_id}).fetchall()
+PriceRange = Literal["90d", "1y", "5y", "max"]
+
+# Window = how far back to look. Bucket = how finely to sample it, so every range
+# returns a similar number of points (~250) no matter how far back it reaches.
+RANGE_WINDOWS = {"90d": "90 days", "1y": "12 months", "5y": "5 years", "max": None}
+RANGE_BUCKETS = {"90d": None, "1y": None, "5y": "week", "max": "month"}
+
+
+def get_price_trend(conn, resource_id: int, price_range: PriceRange = "1y") -> list[PriceTrendEntry]:
+    window = RANGE_WINDOWS[price_range]
+    bucket = RANGE_BUCKETS[price_range]
+
+    where_window = f"AND p.date >= CURRENT_DATE - INTERVAL '{window}'" if window else ""
+
+    if bucket:
+        # One real observation per bucket, the most recent in it. Averaging would
+        # invent prices that never traded, and the threshold bands are derived from
+        # each row's own rolling_std_365d.
+        q = text(f"""
+            SELECT date, price, rolling_std_365d, price_dev_pct FROM (
+                SELECT DISTINCT ON (date_trunc(:bucket, p.date))
+                    p.date, p.value AS price, p.rolling_std_365d, ss.price_dev_pct
+                FROM prices p
+                JOIN shortage_signals ss ON ss.resource_id = p.resource_id AND ss.date = p.date
+                WHERE p.resource_id = :rid
+                {where_window}
+                ORDER BY date_trunc(:bucket, p.date), p.date DESC
+            ) bucketed
+            ORDER BY date ASC
+        """)
+        params = {"rid": resource_id, "bucket": bucket}
+    else:
+        q = text(f"""
+            SELECT p.date, p.value AS price, p.rolling_std_365d, ss.price_dev_pct
+            FROM prices p
+            JOIN shortage_signals ss ON ss.resource_id = p.resource_id AND ss.date = p.date
+            WHERE p.resource_id = :rid
+            {where_window}
+            ORDER BY p.date ASC
+        """)
+        params = {"rid": resource_id}
+
+    rows = conn.execute(q, params).fetchall()
 
     entries = []
     for row in rows:
@@ -142,7 +176,7 @@ def get_production_trend(conn) -> list[ProductionTrendEntry]:
 router = APIRouter()
 
 @router.get("/commodity/{slug}", response_model=CommodityResponse)
-def get_commodity(slug: str):
+def get_commodity(slug: str, price_range: PriceRange = Query("1y", alias="range")):
     if slug not in SLUG_MAP:
         raise HTTPException(status_code=404, detail=f"Commodity slug '{slug}' not found")
 
@@ -171,7 +205,7 @@ def get_commodity(slug: str):
             latest_price=meta_row.latest_price,
         )
 
-        price_trend      = get_price_trend(conn, rid)
+        price_trend      = get_price_trend(conn, rid, price_range)
         comparison       = get_comparison(conn, rid)
         inventory        = get_inventory(conn, rid)
         production_trend = get_production_trend(conn)
