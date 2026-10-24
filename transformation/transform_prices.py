@@ -108,6 +108,23 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def rolling_by_date(df: pd.DataFrame, window: str, min_periods: int, stat: str) -> pd.Series:
+    """Rolling statistic over a CALENDAR window, not a row count.
+
+    `.rolling(365)` counts rows. The oil series are resampled to daily so 365 rows
+    happens to equal a year, but EU TTF is monthly with only ~48 rows a year, which
+    made its "12-month average" a 7.6-year average. A date-based window means the
+    same thing for every commodity regardless of how often the source publishes.
+    """
+    out = []
+    for _, g in df.groupby("resource_id", sort=False):
+        series = g["value"]
+        series.index = pd.to_datetime(g["date"])
+        rolled = getattr(series.rolling(window, min_periods=min_periods), stat)()
+        out.append(pd.Series(rolled.to_numpy(), index=g.index))
+    return pd.concat(out).sort_index()
+
+
 def calculate_metrics(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["resource_id", "date"])
 
@@ -118,25 +135,13 @@ def calculate_metrics(df: pd.DataFrame) -> pd.DataFrame:
         .round(4)
     )
 
-    df["rolling_avg_7d"] = (
-        df.groupby("resource_id")["value"]
-        .transform(lambda x: x.rolling(7, min_periods=1).mean().round(4))
-    )
+    df["rolling_avg_7d"] = rolling_by_date(df, "7D", 1, "mean").round(4)
 
-    df["rolling_avg_30d"] = (
-        df.groupby("resource_id")["value"]
-        .transform(lambda x: x.rolling(30, min_periods=1).mean().round(4))
-    )
+    df["rolling_avg_30d"] = rolling_by_date(df, "30D", 1, "mean").round(4)
 
-    df["rolling_mean_365d"] = (
-        df.groupby("resource_id")["value"]
-        .transform(lambda x: x.rolling(365, min_periods=30).mean())
-    )
+    df["rolling_mean_365d"] = rolling_by_date(df, "365D", 30, "mean")
 
-    df["rolling_std_365d"] = (
-        df.groupby("resource_id")["value"]
-        .transform(lambda x: x.rolling(365, min_periods=30).std())
-    )
+    df["rolling_std_365d"] = rolling_by_date(df, "365D", 30, "std")
 
     df["z_score"] = (
         (df["value"] - df["rolling_mean_365d"]) / df["rolling_std_365d"]
@@ -150,10 +155,7 @@ def calculate_metrics(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def generate_shortage_flags(df: pd.DataFrame) -> pd.DataFrame:
-    mean_12m = (
-        df.groupby("resource_id")["value"]
-        .transform(lambda x: x.rolling(365, min_periods=30).mean())
-    )
+    mean_12m = rolling_by_date(df, "365D", 30, "mean")
 
     df["price_dev_pct"] = ((df["value"] - mean_12m) / mean_12m * 100).round(4)
 
