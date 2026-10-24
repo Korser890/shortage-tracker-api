@@ -1,7 +1,7 @@
 import json
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -17,7 +17,11 @@ FRED_SERIES = [
 
 RAW_DIR = Path(__file__).resolve().parents[1] / "data" / "raw"
 BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
-DEFAULT_LOOKBACK_DAYS = 365 * 5  # 5 years of history on first run
+# FRED honours observation_start, unlike EIA v2 which ignores it and returns up to
+# `length` rows regardless. A 5-year lookback here left EU TTF starting 2021-10 and
+# put the entire 2022 gas crisis inside the 30-point z-score warm-up window.
+# PNGASEUUSDM starts 1992-01-01 on FRED; CPIENGSL starts 1957-01-01.
+DEFAULT_START = "1992-01-01"
 
 def fetch_series(series_id: str, start: str, end: str, retries: int = 3) -> dict:
     params = {
@@ -67,7 +71,7 @@ def run(start: str = None, end: str = None) -> None:
     if end is None:
         end = today
     if start is None:
-        start = (date.today() - timedelta(days=DEFAULT_LOOKBACK_DAYS)).isoformat()
+        start = DEFAULT_START
 
     logger.info(f"FRED energy ingestion — range: {start} to {end}")
 
