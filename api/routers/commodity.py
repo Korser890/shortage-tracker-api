@@ -24,9 +24,12 @@ def get_price_trend(conn, resource_id: int, price_range: PriceRange = "1y") -> l
     where_window = f"AND p.date >= CURRENT_DATE - INTERVAL '{window}'" if window else ""
 
     if bucket:
-        # One real observation per bucket, the most recent in it. Averaging would
-        # invent prices that never traded, and the threshold bands are derived from
-        # each row's own rolling_std_365d.
+        # The HIGHEST real observation in each bucket, not the last one. Averaging would
+        # invent prices that never traded, and taking the last one hid every spike that
+        # reversed inside its bucket: Henry Hub's $30.72 record on 2026-01-23 plotted as
+        # the $6.25 month-end close. On a shortage tracker the bucket high is the
+        # meaningful figure. Each point stays a real observed row, so its own
+        # rolling_std_365d still backs the threshold bands.
         q = text(f"""
             SELECT date, price, rolling_std_365d, price_dev_pct FROM (
                 SELECT DISTINCT ON (date_trunc(:bucket, p.date))
@@ -35,7 +38,7 @@ def get_price_trend(conn, resource_id: int, price_range: PriceRange = "1y") -> l
                 JOIN shortage_signals ss ON ss.resource_id = p.resource_id AND ss.date = p.date
                 WHERE p.resource_id = :rid
                 {where_window}
-                ORDER BY date_trunc(:bucket, p.date), p.date DESC
+                ORDER BY date_trunc(:bucket, p.date), p.value DESC
             ) bucketed
             ORDER BY date ASC
         """)
@@ -53,12 +56,37 @@ def get_price_trend(conn, resource_id: int, price_range: PriceRange = "1y") -> l
 
     rows = conn.execute(q, params).fetchall()
 
+    if bucket and rows:
+        # The newest bucket is partial, and its high may be well above today's price. Append
+        # the latest row so the line still ends where the page header says it does.
+        latest = conn.execute(text("""
+            SELECT p.date, p.value AS price, p.rolling_std_365d, ss.price_dev_pct
+            FROM prices p
+            JOIN shortage_signals ss ON ss.resource_id = p.resource_id AND ss.date = p.date
+            WHERE p.resource_id = :rid
+            ORDER BY p.date DESC
+            LIMIT 1
+        """), {"rid": resource_id}).fetchone()
+        if latest is not None and latest.date != rows[-1].date:
+            rows = list(rows) + [latest]
+
     entries = []
     for row in rows:
         if row.rolling_std_365d is not None:
             rolling_mean = row.price / (1 + row.price_dev_pct / 100)
-            risky    = round(rolling_mean + row.rolling_std_365d,     4)
-            critical = round(rolling_mean + 2 * row.rolling_std_365d, 4)
+
+            # The flag fires on EITHER rule (z > 2.0 OR dev > 30%), so the line the price
+            # actually crosses is the lower of the two. Drawing only the z-score boundary
+            # put the Critical line above the price on ~5-8% of days when the flag already
+            # read CRITICAL, which made the chart look like it disagreed with the flag.
+            risky = round(min(
+                rolling_mean + row.rolling_std_365d,
+                rolling_mean * 1.15,
+            ), 4)
+            critical = round(min(
+                rolling_mean + 2 * row.rolling_std_365d,
+                rolling_mean * 1.30,
+            ), 4)
         else:
             risky = critical = None
 
